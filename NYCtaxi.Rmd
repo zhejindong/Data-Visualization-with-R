@@ -1,0 +1,277 @@
+---
+title: "Green Taxi"
+author: "C941637"
+date: "2018/11/8"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Question 1
+
+Programmatically download and load into your favorite analytical tool the trip data for September 2015.
+
+```{r}
+# load the data 
+green_data<-read.csv('/Users/zhejindong/Downloads/green_tripdata_2015-09.csv')
+```
+Report how many rows and columns of data you have loaded.
+```{r}
+str(green_data)
+```
+
+There are 1494926 rows and 21 columns.
+
+### Question 2
+
+Plot a histogram of the number of the trip distance.
+trip dis: The elapsed trip distance in miles reported by the taximeter
+```{r}
+library(tidyverse)
+ggplot(green_data, aes(x=Trip_distance))+geom_histogram(binwidth = 5)+ggtitle('Trip Distance Distribution')+ylab('Frequency')
+```
+From the graph above, we notice most trip distance is less than 100 miles, except for some outliers. Considering we are concerned with the majority, we can delete the outliers. 
+
+```{r}
+green_subdata<-subset(green_data,Trip_distance<30)
+ggplot(green_subdata, aes(x=Trip_distance))+geom_histogram(binwidth=1)+ggtitle('')+scale_x_continuous(breaks=c(0,1,2,4,8,16,30))+ylab('Frequency')+ggtitle('Exponential Distribution in Trip Distance')
+```
+
+Report any structure you find and any hypotheses you have about that structure.
+
+1 The majority of trip distance distributes from 0 to 16 miles. 
+
+2 From 1 mile to 16 miles, the frequency exponentially decreases.
+
+
+### Question 3
+Report mean and median trip distance grouped by hour of day.
+```{r}
+library(lubridate)
+library(dplyr)
+green_data<-mutate(green_data, Hour=hour(green_data$lpep_pickup_datetime))
+```
+```{r}
+Mean<-setNames(aggregate(green_data$Trip_distance, by=list(green_data$Hour), FUN=mean),c('Hour','Mean of Trip_distance'))
+Mean$'Mean of Trip_distance'<-round(Mean$'Mean of Trip_distance',2)
+Median<-setNames(aggregate(green_data$Trip_distance, by=list(green_data$Hour), FUN=median),c('Hour','Median of Trip_distance'))
+report<-full_join(Mean, Median,by='Hour')
+report
+```
+```{r}
+tidyreport <- report %>% gather(key, value, -Hour) 
+ggplot(tidyreport,aes(x=Hour,y=value,group=key,color=key))+geom_line()+geom_point()+ggtitle('Long Distance Trip at 5Am')
+```
+
+
+
+```{r}
+
+# Using longitude and latitude to locate JFK airport. 
+
+green_data$jfk_drop_airtport <- ifelse((green_data$Dropoff_latitude < 40.645 & green_data$Dropoff_latitude > 40.639&green_data$Dropoff_longitude < -73.775 & green_data$Dropoff_longitude > -73.79)|green_data$RateCodeID==2,1,0)
+
+green_data$jfk_pick_airtport <- ifelse((green_data$Pickup_latitude < 40.645 & green_data$Pickup_latitude > 40.639&green_data$Pickup_longitude < -73.775 & green_data$Pickup_longitude > -73.790)|green_data$RateCodeID==2,1,0)
+
+print("New York Airport")
+Airport<-filter(green_data,(green_data$jfk_drop_airtport==1|jfk_pick_airtport==1|green_data$RateCodeID==3))
+str(Airport$Fare_amount)
+mean(abs(Airport$Fare_amount))
+
+print("JFK Airport")
+JFK<-filter(green_data,(green_data$jfk_drop_airtport==1|jfk_pick_airtport==1|green_data$RateCodeID==3))
+str(JFK$Fare_amount)
+mean(abs(JFK$Fare_amount))
+
+print("Newark Airport")
+Newark<-filter(green_data,RateCodeID==3)
+str(Newark$Fare_amount)
+mean(abs(Newark$Fare_amount))
+
+```
+We'd like to get a rough sense of identifying trips that originate or terminate at one of the NYC area airports. Can you provide a count of how many transactions fit this criteria, the average fare, and any other interesting characteristics of these trips?
+
+In September, there are 9077 total transactions that originate or terminate at JFK airport, and 1117 transactions from and to Newark. The average fare amount for each trip to airport is about 45.99419$.
+
+Annotation: I utilized longitude and latitude to approximately locate JFK airport, rather than only RateCodeID. According to the data dictionary, if RateCodeID equals to 'JFK', we can only get trips between Manhattan and JFK, and the fare amount is fixed at 52 dollars, which will underrepresent the total transactions involving JFK. Besides, the negative fare amount in data needed to be transformed before calculating the average fare.
+```{r}
+library(tidyverse)
+
+None_Air<-filter(green_data,RateCodeID!=2 & jfk_drop_airtport!=1&jfk_pick_airtport!=1)
+None_Air<-data.frame(table(None_Air$Hour))
+names(None_Air)<-c("Hour","Others")
+None_Air$Others<-None_Air$Others/sum(None_Air$Others)
+
+JFK2<-data.frame(table(JFK$Hour))
+names(JFK2)<-c("Hour","JFK")
+JFK2$JFK<-JFK2$JFK/sum(JFK2$JFK)
+
+
+
+Newark2<-data.frame(table(Newark$Hour))
+names(Newark2)<-c("Hour","Newark")
+Newark2$Newark<-Newark2$Newark/sum(Newark2$Newark)
+
+A1<-full_join(None_Air,JFK2,by='Hour')
+Time<-full_join(A1,Newark2,by='Hour')
+
+
+tidyTime <- Time %>% gather(key, value, -Hour) 
+
+ggplot(tidyTime, aes(x=Hour, y=value, group=key,color=key))+geom_line()+ylab('Percent of Trips')+ggtitle('Distinguishable Time Schedule at 5AM')
+
+
+```
+
+The picture above shows three time schedules for JFK, Newark, and others. In comparison with other type of trips, trips originate or terminate at airports have apparently opposite time sechedule from 0AM to 5AM. A suggestion for taxi driver: more consumers at 5AM at NYC airport. 
+
+### Question 4
+Build a derived variable for tip as a percentage of the in total fare.
+```{r}
+
+green_data1<-subset(green_data,green_data$Tip_amount>=0&green_data$Total_amount>0) #remove data with negative fare
+green_data1$Tip_percent<-green_data1$Tip_amount/green_data1$Total_amount
+ggplot(green_data1,aes(x=Tip_percent))+geom_histogram(fill='darkred',bins=50)+ggtitle("Percent of Tip in Total Fare")+ ylab('Frequency')
+```
+
+
+
+Build a predictive model for tip as a percentage of the total fare. Use as much of the data as you like (or all of it). Provide an estimate of performance using an appropriate sample, and show your work.
+
+## Data Preprocessing 
+```{r}
+green_data1$lpep_pickup_datetime<-as.Date(green_data1$lpep_pickup_datetime)
+green_data1$Weekday<-wday(green_data1$lpep_pickup_datetime) # Extract the weekday of time 
+x<-select(green_data1,Tip_percent,RateCodeID,Pickup_longitude,Pickup_latitude,Dropoff_longitude,Dropoff_latitude,Passenger_count,Trip_distance,Fare_amount,Extra,MTA_tax,Tolls_amount,improvement_surcharge,improvement_surcharge,Total_amount,Payment_type,Trip_type,Hour,Weekday)
+```
+```{r}
+x<-scale(x, scale = TRUE) #scale data 
+smp_size <- floor(0.8* nrow(x))
+set.seed(3)
+train_ind <- sample(seq_len(nrow(x)), size = smp_size) # split testing dataset and training dataset
+test_x <- x[-train_ind, ][,2:18]
+test_y<-x[-train_ind, ][,1]
+train_data<- x[train_ind,]
+```
+
+Data Preprocessing module finishes there tasks:
+
+1 Remove data with negative fare amount.
+
+2 Extract weekday of time as new feature.
+
+3 Scale data. 
+
+4 Split training data and testing data with ratio 8:2
+
+## Using Gradient Boosting Machine to predict tip amount
+
+```{r}
+library(h2o)
+h2o.init(
+  nthreads=-1,            
+  max_mem_size = "8G")
+h2o.removeAll()
+gbm <- h2o.gbm(training_frame = as.h2o(train_data),x=2:18,y=1,                      
+               ntrees = 100, learn_rate = 0.2, max_depth = 8)
+```
+```{r}
+summary(gbm) 
+gbm_model_predictions <- predict(gbm,as.h2o(test_x))
+gbm_model_residue<-mean(abs((as.data.frame(gbm_model_predictions)-as.data.frame(test_y))$predict))
+gbm_model_residue  #0.02167418
+
+```
+
+I chose Gradient Boosted Regression Trees because of its three obvious advantages: natural handling of heterogeneous features, predictive power and robustness to outliers in output space. The mean residual is 0.02167418, which performs much better than linear regression model.  
+
+Besides, after analyzing the feature importance, I notice variable 'Total_amount', 'Payment_type' and 'Fare_amount' are three determining factors for tip percent prediction. We can visualize these three factors to explore the relationship between them and tip amount.
+
+
+```{r}
+ggplot(green_data1,aes(x=Total_amount,y=Tip_percent))+geom_point(alpha=0.2)+ggtitle("Negative relationship between Tip percent and Total")
+```
+
+
+```{r}
+x3<-filter(green_data1,Tip_percent<0.6 &Tip_amount>=0)
+x3$Payment_type<-factor(x3$Payment_type,level=c(1,2,3,4,5),
+labels =c('Credit card','Cash','No charge','Dispute','Unknown'))
+ggplot(x3,aes(x=Tip_percent))+geom_histogram(fill='darkred',bins=50)+facet_wrap(~Payment_type)+ggtitle("Tip and Payment style")
+
+x4<-filter(green_data1,Tip_percent<0.6 &Tip_amount>=0&Payment_type==1)
+ggplot(x4,aes(x=Tip_percent))+geom_histogram(fill='darkred',bins=50)+ggtitle("Tip perence and Credit Card Payment Style")
+
+```
+
+The graph above shows that customers paying fare with credit card more possible to give tip than cash. Besides, we also notice for credit card payment, the majority of people tend to give tip as 18% of the total fare. 
+
+
+```{r}
+ggplot(x3,aes(x=Fare_amount,y=Tip_percent))+ggtitle("Negative Releation between Tip percent and Fare")+geom_point(alpha = 0.2)
+
+```
+
+
+### Question 5
+
+##Anomaly Detection
+
+```{r}
+# Daily transcations in September 
+
+Time2<-green_data1$lpep_pickup_datetime
+Time2<-data.frame(table(Time2))
+```
+```{r}
+start <- as.Date("2015-09-23")
+end <- as.Date("2015-09-24")
+names(Time2)<-c('Date','Transactions')
+Time2$Date<-as.Date(Time2$Date)
+ggplot(Time2,aes(x=Time2$Date,y=Transactions,group=1))+geom_line()+geom_text(aes(label = wday(Time2$Date,label = TRUE)))+xlab('Date')+ylab('Average Tip amount')+ggtitle('Unexpected Transcation drop from Sep 23 to Sep 24')+scale_x_date(date_labels = "%d", date_breaks = '1 day')+annotate("rect", xmin = start, xmax = end,
+             ymin = -Inf, ymax = Inf, fill = "red",
+             alpha = .2) +
+    annotate("text", x = end,
+             y =  60000, label = "Sep23 - Sep24",
+             color = "red", hjust = 0)
+```
+```{r}
+start <- as.Date("2015-09-23")
+end <- as.Date("2015-09-25")
+green_data2<-filter(green_data1,Trip_distance>0)
+
+Time3<-green_data2 %>% group_by(lpep_pickup_datetime) %>% summarise_at(vars(Trip_distance),sum)
+ggplot(Time3,aes(x=Time3$lpep_pickup_datetime,y=Trip_distance))+geom_line()+geom_text(aes(label = wday(Time3$lpep_pickup_datetime,label = TRUE)))+ylab('Average Tip_distance')+xlab("Date in September")+ggtitle('Unexpected Total Trip Distance Drop in September 25th')+scale_x_date(date_labels = "%d", date_breaks = '1 day')+annotate("rect", xmin = start, xmax = end,
+             ymin = -Inf, ymax = Inf, fill = "red",
+             alpha = .2) +
+    annotate("text", x = end,
+             y =  210000, label = "Sep23 - Sep25",
+             color = "red", hjust = 0)
+```
+
+```{r}
+# Time analysis
+green_data3<-filter(green_data1,Tip_amount>0)
+Time<-green_data3 %>% group_by(lpep_pickup_datetime) %>% summarise_at(vars(Tip_amount),sum)
+#aggregate(Green_data$Tip_amount,data=green_data,Fun="mean")
+ggplot(Time,aes(x=Time$lpep_pickup_datetime,y=Tip_amount))+geom_line()+geom_text(aes(label = wday(Time$lpep_pickup_datetime,label = TRUE)))+ylab('Average Tip amount')+xlab("Date in September")+ggtitle('Unexpected Tip drop in September 25th')+annotate("rect", xmin = start, xmax = end,
+             ymin = -Inf, ymax = Inf, fill = "red",
+             alpha = .2)+scale_x_date(date_labels = "%d", date_breaks = '1 day')
+
+```
+
+The pictures above demonstrate the fluctuation of total daily transactions, total daily traveling distance, and total daily tip in September, we notice there is a natural weekly circle in Taxi trips, however we found from 09-23 to 09-25 there is a obvious drop. The transactions, traveling distance and tip are all negatively influenced during this period. 
+
+The reason for this anomaly was possibly because of Pope Francis' NYC Visit on 2015-09-25. According to NBC News, dozens of streets were closed from Thursday through Saturday for the pontiff???s visit. Here is the link for the news: https://www.nbcnewyork.com/news/local/Pope-Francis-Visit-Traffic-Transit-Parks-Changes-Delivery-What-To-Know-328675561.html
+
+### More ideas about the project
+
+I would like to make a traffic animation of NYC green taxi, but I was still learning how to use Preprocessing and Transitflow.py to realize it. I plan to present a interactive daily traffic flow of green taxis. 
+
+Besides, I think the longitude and latitude should be taken advantage of to present more information, for example finding the regions with heaviest taxi traffic. 
+
+
